@@ -1,3 +1,51 @@
+# GaussianSplattingPythonViewerPathVideo
+Intended to be a independent submodule in the original [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) repository. Aiming to provide:
+1. Waypoint marking and camera pose exporting
+2. camera pose interpolating
+3. Video generation
+
+with Python language.
+
+The project is based on [Tiny Gaussian Splatting Viewer](https://github.com/limacv/GaussianSplattingViewer).
+
+## How to Use
+### Environment setup
+Navigate to the Origianal Gaussian Splatting repository
+```shell
+cd /path/to/your/gaussian-splatting/
+```
+Get the repo and enter it
+```shell
+git clone https://github.com/SeanComeOn/GaussianSplattingPythonViewerPathVideo
+cd GaussianSplattingPythonViewerPathVideo
+```
+### Mark the waypoints
+Run the interactive viewer
+```shell
+python main.py -m <your_models_absolute_path> -pf <folder_for_path_to_be_generated>
+```
+You can navigate in the scene with keys and mouse, and record the waypoint.
+The path will be saved to the directory under `<folder_for_path_to_be_generated>`. `mypaths/SavedCameraWaypoint.txt` by default.
+`paths/SavedCameraWaypoint.txt` contains the json file for camera parameters defined by original 3D gaussian splatting project.
+
+### Interpolate paths
+```shell
+python interpolate.py -pf <folder_for_path>
+```
+The script will read the `SavedCameraWaypoint.txt` under `<folder_for_path>`, `mypaths/SavedCameraWaypoint.txt` by default. It will generate a new file `DensePath.txt` under `<folder_for_path>`, containing the interpolated pose (position of 3D vector and rotation in quaternions) and camera intrinsics.
+
+### Generate video
+```shell
+python gen_dense_video.py -m <your_models_absolute_path> -pf <folder_for_path>
+```
+The script will read `DensePath.txt` under `<folder_for_path>` and generate the video for the path.
+
+
+
+-----------
+
+Below is the original readme of [Tiny Gaussian Splatting Viewer](https://github.com/limacv/GaussianSplattingViewer)
+
 # Tiny Gaussian Splatting Viewer
 ![UI demo](assets/teaser.png)
 This is a simple Gaussian Splatting Viewer built with PyOpenGL / CUDARasterizer. It's easy to install with minimum dependencies. The goal of this project is to provide a minimum example of the viewer for research and study purpose. 
