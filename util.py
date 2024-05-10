@@ -4,13 +4,146 @@ import numpy as np
 import glm
 import ctypes
 
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+import torch
+from scene import Scene
+import os
+from tqdm import tqdm
+from os import makedirs
+from gaussian_renderer import render
+import torchvision
+from utils.general_utils import safe_state
+from argparse import ArgumentParser
+from arguments import ModelParams, PipelineParams, get_combined_args
+from gaussian_renderer import GaussianModel
+
+from scene.colmap_loader import qvec2rotmat, rotmat2qvec
+import numpy as np
+from torch import nn
+from utils.graphics_utils import getWorld2View2, getProjectionMatrix
+
+
+class CUDA_Camera_Light(nn.Module):
+    def __init__(self, R, T, FoVx, FoVy, w, h,
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
+                 ):
+        super(CUDA_Camera_Light, self).__init__()
+
+        self.R = R
+        self.T = T
+        self.FoVx = FoVx
+        self.FoVy = FoVy
+
+        self.data_device = torch.device("cuda")
+
+        self.image_width = w
+        self.image_height = h
+
+        self.zfar = 100.0
+        self.znear = 0.01
+
+        self.trans = trans
+        self.scale = scale
+
+        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
+        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        
+        self.is_pose_dirty = False
+
+    def get_real_c2w(self):
+        # this is the real pose of camera in the frame
+        Rt = np.zeros((4, 4))
+        Rt[:3, :3] = self.R.transpose()
+        Rt[:3, 3] = self.T
+        Rt[3, 3] = 1.0
+
+        C2W = np.linalg.inv(Rt)
+        return C2W
+    
+    def get_gs_def_TR_from_real_c2w(self, c2w):
+        w2c = np.linalg.inv(c2w)
+        R = w2c[:3, :3].transpose()
+        T = w2c[:3, 3]
+        return T,R
+
+    def get_real_TR_from_real_c2w(self, c2w):
+        R = c2w[:3, :3]
+        T = c2w[:3, 3]
+        return T,R
+    
+    def get_gs_def_tr_from_real_tr(self, t,r):
+        Rt = np.zeros((4, 4))
+        Rt[:3, :3] = r
+        Rt[:3, 3] = t
+        Rt[3, 3] = 1.0
+        return self.get_gs_def_TR_from_real_c2w(Rt)
+    
+    def get_real_tr(self):
+        return self.get_real_TR_from_real_c2w(self.get_real_c2w())
+
+    def process_mov_z_key(self, d):
+        t,r = self.get_real_tr()
+        t += d * 0.02 * r[:, 2]
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        # self.T += d * 0.02 * self.R[:, 2]
+        self.is_pose_dirty = True
+
+    def process_mov_x_key(self, d):
+        t,r = self.get_real_tr()
+        t += d * 0.02 * r[:, 0]
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        # self.T += d * 0.02 * self.R[:, 0]
+        self.is_pose_dirty = True
+
+    def process_mov_y_key(self, d):
+        t,r = self.get_real_tr()
+        t += d * 0.02 * r[:, 1]
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        self.is_pose_dirty = True
+
+    def process_rollz_key(self, d):
+        ang = d * 0.01
+        t,r = self.get_real_tr()
+        r = r @ np.array([[np.cos(ang), -np.sin(ang), 0], [np.sin(ang), np.cos(ang), 0], [0, 0, 1]])
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        self.is_pose_dirty = True
+
+    def process_rollx_key(self, d):
+        ang = d * 0.01
+        t,r = self.get_real_tr()
+        r = r @ np.array([[1, 0, 0], [0, np.cos(ang), -np.sin(ang)], [0, np.sin(ang), np.cos(ang)]])
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        self.is_pose_dirty = True
+
+    def process_rolly_key(self, d):
+        ang = d * 0.01
+        t,r = self.get_real_tr()
+        r = r @ np.array([[np.cos(ang), 0, np.sin(ang)], [0, 1, 0], [-np.sin(ang), 0, np.cos(ang)]])
+        self.T, self.R = self.get_gs_def_tr_from_real_tr(t,r)
+        self.is_pose_dirty = True
+                                   
+    def update_camera_pose(self):
+        self.world_view_transform = torch.tensor(getWorld2View2(self.R, self.T, self.trans, self.scale)).transpose(0, 1).cuda()
+        # self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
+        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
+        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.is_pose_dirty = False
+    
+
 class Camera:
     def __init__(self, h, w):
         self.znear = 0.01
         self.zfar = 100
         self.h = h
         self.w = w
-        self.fovy = np.pi / 2
+        self.fovy = np.pi / 4
         self.position = np.array([0.0, 0.0, 3.0]).astype(np.float32)
         self.target = np.array([0.0, 0.0, 0.0]).astype(np.float32)
         self.up = np.array([0.0, -1.0, 0.0]).astype(np.float32)
@@ -27,7 +160,7 @@ class Camera:
         self.is_leftmouse_pressed = False
         self.is_rightmouse_pressed = False
         
-        self.rot_sensitivity = 0.02
+        self.rot_sensitivity = 0.005
         self.trans_sensitivity = 0.01
         self.zoom_sensitivity = 0.08
         self.roll_sensitivity = 0.03
@@ -119,6 +252,27 @@ class Camera:
         right = np.cross(front, self.up)
         new_up = self.up + right * (d * self.roll_sensitivity / np.linalg.norm(right))
         self.up = new_up / np.linalg.norm(new_up)
+        self.is_pose_dirty = True
+
+    def process_mov_forward_key(self, d):
+        front = self.target - self.position
+        movement = d * 0.1 * front
+        self.position += movement
+        self.target += movement
+        self.is_pose_dirty = True
+
+    def process_mov_right_key(self, d):
+        front = self.target - self.position # z
+        right = np.cross(front, self.up)
+        movement = d * 0.1 * right
+        self.position += movement
+        self.target += movement
+        self.is_pose_dirty = True
+
+    def process_mov_up_key(self, d):
+        movement = d * 0.1 * self.up
+        self.position += movement
+        self.target += movement
         self.is_pose_dirty = True
 
     def flip_ground(self):

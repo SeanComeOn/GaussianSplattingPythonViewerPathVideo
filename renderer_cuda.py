@@ -11,7 +11,9 @@ from renderer_ogl import GaussianRenderBase
 from dataclasses import dataclass
 from cuda import cudart as cu
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+import json
 
+from gaussian_renderer import render
 
 VERTEX_SHADER_SOURCE = """
 #version 450
@@ -130,6 +132,15 @@ class CUDARenderer(GaussianRenderBase):
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
+    def get_raster_setting_dict_for_json(self):
+        toprint = {}
+        for key, value in self.raster_settings.items():
+            if torch.is_tensor(value):
+                toprint[key] = value.cpu().numpy().tolist()
+            else:
+                toprint[key] = value
+        return toprint
+    
     def update_gaussian_data(self, gaus: util_gau.GaussianData):
         self.gaussians = gaus_cuda_from_cpu(gaus)
         self.raster_settings["sh_degree"] = int(np.round(np.sqrt(self.gaussians.sh_dim))) - 1
@@ -203,7 +214,7 @@ class CUDARenderer(GaussianRenderBase):
         rasterizer = GaussianRasterizer(raster_settings=raster_settings)
         # means2D = torch.zeros_like(self.gaussians.xyz, dtype=self.gaussians.xyz.dtype, requires_grad=False, device="cuda")
         with torch.no_grad():
-            img, radii = rasterizer(
+            img, radii, _1, _2, _3 = rasterizer(
                 means3D = self.gaussians.xyz,
                 means2D = None,
                 shs = self.gaussians.sh,
@@ -213,6 +224,44 @@ class CUDARenderer(GaussianRenderBase):
                 rotations = self.gaussians.rot,
                 cov3D_precomp = None
             )
+
+        img = img.permute(1, 2, 0)
+        img = torch.concat([img, torch.ones_like(img[..., :1])], dim=-1)
+        img = img.contiguous()
+        height, width = img.shape[:2]
+        # transfer
+        (err,) = cu.cudaGraphicsMapResources(1, self.cuda_image, cu.cudaStreamLegacy)
+        if err != cu.cudaError_t.cudaSuccess:
+            raise RuntimeError("Unable to map graphics resource")
+        err, array = cu.cudaGraphicsSubResourceGetMappedArray(self.cuda_image, 0, 0)
+        if err != cu.cudaError_t.cudaSuccess:
+            raise RuntimeError("Unable to get mapped array")
+        
+        (err,) = cu.cudaMemcpy2DToArrayAsync(
+            array,
+            0,
+            0,
+            img.data_ptr(),
+            4 * 4 * width,
+            4 * 4 * width,
+            height,
+            cu.cudaMemcpyKind.cudaMemcpyDeviceToDevice,
+            cu.cudaStreamLegacy,
+        )
+        if err != cu.cudaError_t.cudaSuccess:
+            raise RuntimeError("Unable to copy from tensor to texture")
+        (err,) = cu.cudaGraphicsUnmapResources(1, self.cuda_image, cu.cudaStreamLegacy)
+        if err != cu.cudaError_t.cudaSuccess:
+            raise RuntimeError("Unable to unmap graphics resource")
+
+        gl.glUseProgram(self.program)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.tex)
+        gl.glBindVertexArray(self.vao)
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
+
+    ## a naive and brutal way to get what we want
+    def draw_scene_setting(self, now_view, my_gaussian, pipeline, background):
+        img = render(now_view, my_gaussian, pipeline, background)["render"]
 
         img = img.permute(1, 2, 0)
         img = torch.concat([img, torch.ones_like(img[..., :1])], dim=-1)

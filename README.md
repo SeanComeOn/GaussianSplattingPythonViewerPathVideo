@@ -25,8 +25,8 @@ Run the interactive viewer
 python main.py -m <your_models_absolute_path> -pf <folder_for_path_to_be_generated>
 ```
 You can navigate in the scene with keys and mouse, and record the waypoint.
-The path will be saved to the directory under `<folder_for_path_to_be_generated>`. `mypaths/SavedCameraWaypoint.txt` by default.
-`paths/SavedCameraWaypoint.txt` contains the json file for camera parameters defined by original 3D gaussian splatting project.
+The path will be saved to the directory under `<folder_for_path_to_be_generated>`. `mypaths/SavedCameraWaypoint.json` by default.
+`paths/SavedCameraWaypoint.json` contains the json file for camera parameters defined by original 3D gaussian splatting project.
 
 ### Interpolate paths
 ```shell
