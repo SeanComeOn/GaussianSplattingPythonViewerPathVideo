@@ -15,6 +15,8 @@ import argparse
 from renderer_ogl import OpenGLRenderer, GaussianRenderBase
 import json
 
+import math
+
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -47,7 +49,10 @@ from util import CUDA_Camera_Light
 
 
 
-g_camera = util.Camera(720, 1280)
+# g_camera = util.Camera(720, 1280)
+g_camera = util.Camera(720, 2160)
+# height, width
+
 now_view = None
 BACKEND_OGL=0
 BACKEND_CUDA=1
@@ -217,6 +222,8 @@ def main():
 
     parser.add_argument("--hidpi", action="store_true", help="Enable HiDPI scaling for the interface.")
     parser.add_argument('-pf', '--path_folder', type=str, help='Folder for path to be generated')
+    # panorama option: split or full
+    parser.add_argument('-p', '--panorama', type=str, default="None", help='Panorama type: split or full')
     # args = parser.parse_args()
     # Use the arguments
 
@@ -244,14 +251,30 @@ def main():
         views = scene.getTrainCameras()
 
         init_view = views[0]
-        fovx = init_view.FoVx
-        fovy = init_view.FoVy
+        init_view.R = qvec2rotmat(np.array([1,0,0,0]))
+        # i have 1, but why is -1
+        init_view.T = np.array([0.0, 0.0, 1.0])
         R = init_view.R
         T = init_view.T
         # w = init_view.image_width
         # h = init_view.image_height
-        w = 1280
+
+        # fovx = init_view.FoVx
+        # fovy = init_view.FoVy
+        # w = 1280
+        # h = 720
+
+        # fovx = math.pi / 3
+        # fovy = math.pi / 3
+        # w = 720
+        # h = 720
+
+        fovx = math.pi * 2 / 3
+        fovy = math.pi * 2 / 3
+        w = 720
         h = 720
+
+
         print(f"fovx = {fovx}, fovy = {fovy}")
         print(f"R = {R}")
         print(f"T = {T}")
@@ -328,7 +351,8 @@ def main():
         
         # 调用renderer的draw方法
         # g_renderer.draw()
-        g_renderer.draw_scene_setting(now_view, my_gaussian, pipeline, background)
+        
+        g_renderer.draw_scene_setting(now_view, my_gaussian, pipeline, background, panorama=args.panorama)
 
         # imgui ui
         # update control information
@@ -522,7 +546,4 @@ def main():
 
 
 if __name__ == "__main__":
-
-
-
     main()

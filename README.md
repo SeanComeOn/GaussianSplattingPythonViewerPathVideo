@@ -40,7 +40,19 @@ python gen_dense_video.py -m <your_models_absolute_path> -pf <folder_for_path>
 ```
 The script will read `DensePath.txt` under `<folder_for_path>` and generate the video for the path.
 
+### functionality
 
+You can checkout some of the tags to see the functionality of the project. The tags are:
+
+1. `v0.1`: Basic waypoint marking and camera pose exporting, with the ability to interpolate the camera poses and generate video. The image size is proper.
+
+2. `v0.2`: Support panorama image generation. The HFoV is set to 120 degrees. Three images with 120 degrees VFoV are generated if you use parameter `--panorama split`.
+ <!-- One full panorama image with 120 degrees HFoV and 360 degrees VFoV will be generated if you use parameter `--panorama full`. -->
+
+for example, 
+```shell
+python main.py -m <your_models_absolute_path> -pf <folder_for_path_to_be_generated> --panorama split
+``` 
 
 -----------
 

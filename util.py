@@ -67,6 +67,7 @@ class CUDA_Camera_Light(nn.Module):
         C2W = np.linalg.inv(Rt)
         return C2W
     
+    @classmethod
     def get_gs_def_TR_from_real_c2w(self, c2w):
         w2c = np.linalg.inv(c2w)
         R = w2c[:3, :3].transpose()
@@ -78,6 +79,7 @@ class CUDA_Camera_Light(nn.Module):
         T = c2w[:3, 3]
         return T,R
     
+    @classmethod
     def get_gs_def_tr_from_real_tr(self, t,r):
         Rt = np.zeros((4, 4))
         Rt[:3, :3] = r

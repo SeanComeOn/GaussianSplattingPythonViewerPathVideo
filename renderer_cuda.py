@@ -12,8 +12,10 @@ from dataclasses import dataclass
 from cuda import cudart as cu
 from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 import json
+import equilib
 
 from gaussian_renderer import render
+from util import CUDA_Camera_Light
 
 VERTEX_SHADER_SOURCE = """
 #version 450
@@ -260,8 +262,38 @@ class CUDARenderer(GaussianRenderBase):
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, 3)
 
     ## a naive and brutal way to get what we want
-    def draw_scene_setting(self, now_view, my_gaussian, pipeline, background):
-        img = render(now_view, my_gaussian, pipeline, background)["render"]
+    def draw_scene_setting(self, now_view, my_gaussian, pipeline, background, panorama=False):
+        if panorama=="split" or panorama=="full":
+            # pass
+            # left
+            rotate_y_neg120 = np.array([[np.cos(-2*np.pi/3), 0, np.sin(-2*np.pi/3)],
+                                            [0, 1, 0],
+                                            [-np.sin(-2*np.pi/3), 0, np.cos(-2*np.pi/3)]])
+            # right
+            rotate_y_pos120 = np.array([[np.cos(2*np.pi/3), 0, np.sin(2*np.pi/3)],
+                                            [0, 1, 0],
+                                            [-np.sin(2*np.pi/3), 0, np.cos(2*np.pi/3)]])
+            real_T, real_R = now_view.get_real_tr()
+            real_R_left = real_R @ rotate_y_neg120
+            real_R_right = real_R @ rotate_y_pos120
+            gs_left_T, gs_left_R = CUDA_Camera_Light.get_gs_def_tr_from_real_tr(real_T, real_R_left)
+            gs_right_T, gs_right_R = CUDA_Camera_Light.get_gs_def_tr_from_real_tr(real_T, real_R_right)
+
+
+            now_view_left = CUDA_Camera_Light(R=gs_left_R, T=gs_left_T, FoVx=now_view.FoVx, FoVy=now_view.FoVy, w=now_view.image_width, h=now_view.image_height)
+            now_view_right = CUDA_Camera_Light(R=gs_right_R, T=gs_right_T, FoVx=now_view.FoVx, FoVy=now_view.FoVy, w=now_view.image_width, h=now_view.image_height)
+            img_left = render(now_view_left, my_gaussian, pipeline, background)["render"]
+            img_right = render(now_view_right, my_gaussian, pipeline, background)["render"]
+            img_center = render(now_view, my_gaussian, pipeline, background)["render"]
+            if panorama=="split":
+                img = torch.cat([img_left, img_center, img_right], dim=2)
+            else:
+                # full not implemented yes
+                # TODO: implement full panorama
+                img = torch.cat([img_left, img_center, img_right], dim=2)
+        else:
+            img = render(now_view, my_gaussian, pipeline, background)["render"]
+            # print(img.shape) # C, H, W
 
         img = img.permute(1, 2, 0)
         img = torch.concat([img, torch.ones_like(img[..., :1])], dim=-1)
